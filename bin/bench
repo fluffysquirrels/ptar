@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -eu -o pipefail
+
+readonly repo_dir="$( cd $(dirname ${BASH_SOURCE})/..; pwd )"
+
+(
+    cd "${repo_dir}"
+    cargo build --release
+)
+
+echo "Syncing to disk and dropping caches"
+sync
+echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+
+IN_PATH="${HOME}/Code/FreeCAD"
+OUT_DIR="${HOME}/tmp/ptar-bench-out/$(date -Is)"
+echo "OUT_DIR=${OUT_DIR}"
+
+echo "Starting ptar"
+time target/release/ptar \
+         --in-path "${IN_PATH}" \
+         --out-dir "${OUT_DIR}" \
+         --threads 8
+
+echo -e "\nOUT_DIR=${OUT_DIR}"
