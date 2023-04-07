@@ -5,9 +5,11 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     result::Result as StdResult,
+    time::Instant,
 };
+use valuable::Valuable;
 
-#[derive(clap::Parser)]
+#[derive(clap::Parser, Valuable)]
 struct Args {
     #[arg(long)]
     in_path: PathBuf,
@@ -28,13 +30,14 @@ enum LogMode {
 struct PVB {
     in_path: PathBuf,
     in_prefix: PathBuf,
-    next_archive_number: u64,
+    next_archive_num: u64,
     out_dir: PathBuf,
 }
 
 struct ErrorPV;
 
 struct PV {
+    archive_num: u64,
     in_prefix: PathBuf,
     out_path: PathBuf,
     /// Always Some(_) except in the drop implementation.
@@ -47,9 +50,13 @@ type Result<T> = std::result::Result<T, Error>;
 const ZSTD_DEFAULT_COMPRESSION_LEVEL: i32 = 0;
 
 fn main() -> Result<()> {
+    let start = Instant::now();
+
     let args = Args::parse();
 
     init_logging(args.log_json)?;
+
+    tracing::info!(args = args.as_value(), "Starting");
 
     let in_meta = args.in_path.metadata()?;
     let (in_prefix, in_path) = if in_meta.is_dir() {
@@ -72,9 +79,11 @@ fn main() -> Result<()> {
     walker.visit(&mut PVB {
         in_path: in_path,
         in_prefix: in_prefix,
-        next_archive_number: 0,
+        next_archive_num: 0,
         out_dir: args.out_dir,
     });
+
+    tracing::info!(duration_ms = start.elapsed().as_millis(), "Done");
 
     Ok(())
 }
@@ -131,8 +140,8 @@ fn init_logging(log_json: bool) -> Result<()> {
 impl ignore::ParallelVisitorBuilder<'static> for PVB {
     /// Build a visitor for an ignore thread.
     fn build(&mut self) -> Box<dyn ignore::ParallelVisitor + 'static> {
-        let archive_num = self.next_archive_number;
-        self.next_archive_number += 1;
+        let archive_num = self.next_archive_num;
+        self.next_archive_num += 1;
         let out_file_path = self.out_dir.join(format!("{archive_num:08}.tar.zstd"));
 
         // Closure to capture errors returned with `?`.
@@ -142,9 +151,13 @@ impl ignore::ParallelVisitorBuilder<'static> for PVB {
                                        .create_new(true)
                                        .open(&*out_file_path)?;
             let bufw = BufWriter::with_capacity(128 * 1024, file);
-            let zstdw = zstd::stream::write::Encoder::new(bufw, ZSTD_DEFAULT_COMPRESSION_LEVEL)?;
+            let mut zstdw = zstd::stream::write::Encoder::new(bufw,
+                                                              ZSTD_DEFAULT_COMPRESSION_LEVEL)?;
+            // Compression will be done in a separate thread, to detach I/O and compression.
+            zstdw.multithread(1)?;
             let tarb = tar::Builder::new(zstdw);
             Ok(PV {
+                archive_num,
                 in_prefix: self.in_prefix.clone(),
                 out_path: out_file_path.to_path_buf(),
                 tarb: Some(tarb),
@@ -210,6 +223,9 @@ impl ignore::ParallelVisitor for PV {
 
 impl Drop for PV {
     fn drop(&mut self) {
+        tracing::debug!(archive_num = self.archive_num,
+                        "PV::drop start");
+
         // Closure to catch errors with `?`.
         let res = (|| -> Result<()> {
             let tarb = self.tarb.take();
@@ -224,6 +240,9 @@ impl Drop for PV {
 
             Ok(())
         })();
+
+        tracing::debug!(archive_num = self.archive_num,
+                        "PV::drop complete");
 
         if let Err(err) = res {
             tracing::error!(%err, out_path = %self.out_path.display(),

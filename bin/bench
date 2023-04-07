@@ -1,25 +1,40 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -eu -o pipefail
 
-readonly repo_dir="$( cd $(dirname ${BASH_SOURCE})/..; pwd )"
+readonly repo_dir="$( cd $(dirname ${(%):-%x})/..; pwd )"
+
+IN_PATH="${HOME}/Code/FreeCAD"
+OUT_DIR="${HOME}/tmp/ptar-bench-out/$(date -Is)"
+EXTRACT_DIR="${OUT_DIR}/extract"
+: ${THREADS:=4}
 
 (
+    # build in repo root to pick up rust-toolchain file and .cargo/config.toml file.
     cd "${repo_dir}"
     cargo build --release
 )
 
-echo "Syncing to disk and dropping caches"
-sync
-echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+"${repo_dir}/bin/drop-caches"
 
-IN_PATH="${HOME}/Code/FreeCAD"
-OUT_DIR="${HOME}/tmp/ptar-bench-out/$(date -Is)"
-echo "OUT_DIR=${OUT_DIR}"
+mkdir -p "${EXTRACT_DIR}"
 
-echo "Starting ptar"
+echo "Starting archiving with ptar"
+
 time target/release/ptar \
          --in-path "${IN_PATH}" \
          --out-dir "${OUT_DIR}" \
-         --threads 8
+         --threads "${THREADS}"
+
+echo "Finished archiving with ptar"
+
+"${repo_dir}/bin/drop-caches"
+
+echo "Starting extracting"
+
+time ls ${OUT_DIR}/*.tar.zstd \
+     | xargs -I% -P${THREADS} \
+           zsh -c "time zstdcat % | tar --extract -C \"${EXTRACT_DIR}\""
+
+echo "Finished extracting"
 
 echo -e "\nOUT_DIR=${OUT_DIR}"

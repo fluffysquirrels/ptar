@@ -1,0 +1,31 @@
+#!/usr/bin/env zsh
+set -eu -o pipefail
+
+readonly repo_dir="$( cd $(dirname ${(%):-%x})/..; pwd )"
+
+IN_PATH="${HOME}/Code/FreeCAD"
+OUT_DIR="${HOME}/tmp/ptar-bench-out/tar/$(date -Iseconds)"
+OUT_FILE="${OUT_DIR}/out.tar.zstd"
+EXTRACT_DIR="${OUT_DIR}/extract"
+: ${ZSTD_THREADS:=0} # 0 means auto.
+
+"${repo_dir}/bin/drop-caches"
+
+mkdir -p "${EXTRACT_DIR}"
+
+echo "Start archiving"
+time tar -c "${IN_PATH}" \
+     | zstd --compress --verbose -T${ZSTD_THREADS} \
+     > "${OUT_FILE}"
+echo "Finished archiving"
+
+"${repo_dir}/bin/drop-caches"
+
+echo "Start extracting"
+
+time zstdcat --verbose -T${ZSTD_THREADS} "${OUT_FILE}" \
+     | tar --extract -C "${EXTRACT_DIR}"
+
+echo "Finished extracting"
+
+echo -e "\nOUT_DIR=${OUT_DIR}"
