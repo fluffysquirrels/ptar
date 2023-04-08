@@ -3,29 +3,41 @@ set -eu -o pipefail
 
 readonly repo_dir="$( cd $(dirname ${(%):-%x})/..; pwd )"
 
-IN_PATH="${HOME}/Code/FreeCAD"
+: ${IN_PATH:="${HOME}/Code/FreeCAD"}
 OUT_DIR="${HOME}/tmp/ptar-bench-out/tar/$(date -Iseconds)"
 OUT_FILE="${OUT_DIR}/out.tar.zstd"
 EXTRACT_DIR="${OUT_DIR}/extract"
 : ${ZSTD_THREADS:=0} # 0 means auto.
+: ${DELETE_OUTPUT:=true}
 
 "${repo_dir}/bin/drop-caches"
 
 mkdir -p "${EXTRACT_DIR}"
 
-echo "Start archiving"
-time tar -c "${IN_PATH}" \
+echo -e "\nStart archiving"
+time tar -C "${IN_PATH}" -c . \
      | zstd --compress --verbose -T${ZSTD_THREADS} \
      > "${OUT_FILE}"
 echo "Finished archiving"
 
 "${repo_dir}/bin/drop-caches"
 
-echo "Start extracting"
+echo -e "\nStart extracting"
 
 time zstdcat --verbose -T${ZSTD_THREADS} "${OUT_FILE}" \
      | tar --extract -C "${EXTRACT_DIR}"
 
 echo "Finished extracting"
 
-echo -e "\nOUT_DIR=${OUT_DIR}"
+echo -e "\nStarting diff"
+
+diff -r "${IN_PATH}" "${EXTRACT_DIR}"
+
+echo -e "Finished diff\n"
+
+if [ "${DELETE_OUTPUT}" = "true" ]; then
+    echo "Deleting OUT_DIR=${OUT_DIR}"
+    rm -rf "${OUT_DIR}"
+else
+    echo "Leaving output at OUT_DIR=${OUT_DIR}"
+fi

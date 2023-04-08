@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 set -eu -o pipefail
 
-echo "Syncing to disk and dropping caches"
+echo -e "\nSyncing to disk and dropping caches"
 
 time sync
 
