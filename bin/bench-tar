@@ -31,7 +31,7 @@ echo "Finished extracting"
 
 echo -e "\nStarting diff"
 
-diff -r "${IN_PATH}" "${EXTRACT_DIR}"
+time diff -r "${IN_PATH}" "${EXTRACT_DIR}"
 
 echo -e "Finished diff\n"
 

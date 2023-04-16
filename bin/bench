@@ -37,16 +37,18 @@ echo "Finished archiving with ptar"
 
 echo -e "\nStarting extracting"
 
-time ls ${OUT_DIR}/*.tar.zstd \
-     | xargs -I% -P${THREADS} \
-           zsh -c "time zstdcat % | tar --no-overwrite-dir --extract -C \"${EXTRACT_DIR}\""
+time target/release/ptar \
+         --threads $(( THREADS + 1 )) \
+         decompress \
+         --in-dir "${OUT_DIR}" \
+         --out-dir "${EXTRACT_DIR}"
 
 echo "Finished extracting"
 
 echo -e "\nStarting diff"
 
 # `|| true` to continue if there are differences, in particular we need to clean up.
-diff -r "${IN_PATH}" "${EXTRACT_DIR}" || true
+time diff -r "${IN_PATH}" "${EXTRACT_DIR}" || true
 
 echo -e "Finished diff\n"
 
