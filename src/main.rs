@@ -1,3 +1,4 @@
+use anyhow::ensure;
 use clap::Parser;
 use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::{
@@ -5,6 +6,10 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     result::Result as StdResult,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Instant,
 };
 use valuable::Valuable;
@@ -49,6 +54,7 @@ enum LogMode {
 }
 
 struct PVB {
+    error_count: Arc<AtomicUsize>,
     in_path: PathBuf,
     in_prefix: PathBuf,
     next_archive_num: u64,
@@ -59,6 +65,7 @@ struct ErrorPV;
 
 struct PV {
     archive_num: u64,
+    error_count: Arc<AtomicUsize>,
     in_prefix: PathBuf,
     out_path: PathBuf,
     /// Always Some(_) except in the drop implementation.
@@ -79,9 +86,16 @@ fn main() -> Result<()> {
 
     tracing::info!(args = args.as_value(), "Starting");
 
-    match &args.command {
-        Command::Compress(cmd_args) => compress(cmd_args.clone(), args)?,
-        Command::Decompress(cmd_args) => decompress(cmd_args.clone(), args)?,
+    let res = match &args.command {
+        Command::Compress(cmd_args) => compress(cmd_args.clone(), args),
+        Command::Decompress(cmd_args) => decompress(cmd_args.clone(), args),
+    };
+
+    if let Err(err) = res {
+        // tracing::error! to show it nicely formatted, potentially in JSON.
+        tracing::error!(err = %err, "Error");
+        // Return the error too to show a Rust backtrace on the CLI.
+        return Err(err);
     }
 
     tracing::info!(duration_ms = start.elapsed().as_millis(), "Done");
@@ -108,12 +122,18 @@ fn compress(cmd_args: CompressArgs, args: Args) -> Result<()> {
                     .standard_filters(false)
                     .build_parallel();
 
+    let error_count = Arc::new(AtomicUsize::new(0));
+
     walker.visit(&mut PVB {
+        error_count: error_count.clone(),
         in_path: in_path,
         in_prefix: in_prefix,
         next_archive_num: 0,
         out_dir: cmd_args.out_dir,
     });
+
+    let final_error_count = error_count.load(Ordering::SeqCst);
+    ensure!(final_error_count == 0, "Errors in compress() count={final_error_count}");
 
     Ok(())
 }
@@ -192,6 +212,7 @@ impl ignore::ParallelVisitorBuilder<'static> for PVB {
             let tarb = tar::Builder::new(zstdw);
             Ok(PV {
                 archive_num,
+                error_count: self.error_count.clone(),
                 in_prefix: self.in_prefix.clone(),
                 out_path: out_file_path.to_path_buf(),
                 tarb: Some(tarb),
@@ -205,6 +226,7 @@ impl ignore::ParallelVisitorBuilder<'static> for PVB {
                                 archive_num,
                                 %err,
                                 "Error creating ParallelVisitor");
+                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
                 Box::new(ErrorPV)
             },
             Ok(pv) => Box::new(pv),
@@ -223,6 +245,7 @@ impl ignore::ParallelVisitor for PV {
         let entry = match entry {
             Err(err) => {
                 tracing::warn!(%err, "Error given to PV.visit");
+                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
                 return WalkState::Continue;
             },
             Ok(v) => v,
@@ -242,12 +265,14 @@ impl ignore::ParallelVisitor for PV {
                                 prefix = %self.in_prefix.display(),
                                 %err,
                                 "Error stripping path prefix");
+                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
                 return WalkState::Quit;
             }
         };
         if let Err(err) = self.tarb.as_mut().expect("PV.tarb always Some except in drop")
                                    .append_path_with_name(path, rel_path) {
             tracing::error!(path = %path.display(), %err, "Error appending file");
+            let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
             return WalkState::Quit;
         }
 
@@ -281,6 +306,7 @@ impl Drop for PV {
         if let Err(err) = res {
             tracing::error!(%err, out_path = %self.out_path.display(),
                             "Error while closing archive in PV::drop()");
+            let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
         }
     }
 }
