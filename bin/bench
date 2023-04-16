@@ -3,9 +3,9 @@ set -eu -o pipefail
 
 readonly repo_dir="$( cd $(dirname ${(%):-%x})/..; pwd )"
 
-: ${IN_PATH:="${HOME}/Code/FreeCAD"}
-OUT_DIR="${HOME}/tmp/ptar-bench-out/$(date -Is)"
-EXTRACT_DIR="${OUT_DIR}/extract"
+: ${IN_PATH:?Set an input path in this environment variable to archive and compress}
+: ${OUT_DIR:="${HOME}/tmp/ptar/bench-out/$(date -Is)"}
+: ${EXTRACT_DIR:="${OUT_DIR}/extract"}
 : ${THREADS:=2}
 : ${RUST_LOG:=ptar=debug}
 : ${DELETE_OUTPUT:=true}
@@ -26,9 +26,10 @@ mkdir -p "${EXTRACT_DIR}"
 echo -e "\nStarting archiving with ptar"
 
 time target/release/ptar \
+         --threads "${THREADS}" \
+         compress \
          --in-path "${IN_PATH}" \
-         --out-dir "${OUT_DIR}" \
-         --threads "${THREADS}"
+         --out-dir "${OUT_DIR}"
 
 echo "Finished archiving with ptar"
 
@@ -38,7 +39,7 @@ echo -e "\nStarting extracting"
 
 time ls ${OUT_DIR}/*.tar.zstd \
      | xargs -I% -P${THREADS} \
-           zsh -c "time zstdcat % | tar --extract -C \"${EXTRACT_DIR}\""
+           zsh -c "time zstdcat % | tar --no-overwrite-dir --extract -C \"${EXTRACT_DIR}\""
 
 echo "Finished extracting"
 

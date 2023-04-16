@@ -4,7 +4,7 @@ set -eu -o pipefail
 readonly repo_dir="$( cd $(dirname ${(%):-%x})/..; pwd )"
 
 : ${IN_PATH:="${HOME}/Code/FreeCAD"}
-OUT_DIR="${HOME}/tmp/ptar-bench-out/tar/$(date -Iseconds)"
+OUT_DIR="${HOME}/tmp/ptar/tar-bench-out/$(date -Iseconds)"
 OUT_FILE="${OUT_DIR}/out.tar.zstd"
 EXTRACT_DIR="${OUT_DIR}/extract"
 : ${ZSTD_THREADS:=0} # 0 means auto.

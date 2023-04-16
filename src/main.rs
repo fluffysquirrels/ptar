@@ -12,13 +12,34 @@ use valuable::Valuable;
 #[derive(clap::Parser, Valuable)]
 struct Args {
     #[arg(long)]
-    in_path: PathBuf,
-    #[arg(long)]
-    out_dir: PathBuf,
-    #[arg(long)]
     threads: usize,
     #[arg(long)]
     log_json: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(clap::Subcommand, Clone, Debug, Valuable)]
+enum Command {
+    Compress(CompressArgs),
+    Decompress(DecompressArgs),
+}
+
+#[derive(clap::Args, Clone, Debug, Valuable)]
+struct CompressArgs {
+    #[arg(long)]
+    in_path: PathBuf,
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(clap::Args, Clone, Debug, Valuable)]
+struct DecompressArgs {
+    #[arg(long)]
+    in_dir: PathBuf,
+    #[arg(long)]
+    out_dir: PathBuf,
 }
 
 #[derive(Eq, PartialEq)]
@@ -58,17 +79,28 @@ fn main() -> Result<()> {
 
     tracing::info!(args = args.as_value(), "Starting");
 
-    let in_meta = args.in_path.metadata()?;
+    match &args.command {
+        Command::Compress(cmd_args) => compress(cmd_args.clone(), args)?,
+        Command::Decompress(cmd_args) => decompress(cmd_args.clone(), args)?,
+    }
+
+    tracing::info!(duration_ms = start.elapsed().as_millis(), "Done");
+
+    Ok(())
+}
+
+fn compress(cmd_args: CompressArgs, args: Args) -> Result<()> {
+    let in_meta = cmd_args.in_path.metadata()?;
     let (in_prefix, in_path) = if in_meta.is_dir() {
-        (args.in_path.clone(), args.in_path.clone())
+        (cmd_args.in_path.clone(), cmd_args.in_path.clone())
     } else {
-        match args.in_path.parent() {
-            Some(parent) => (parent.to_path_buf(), args.in_path.clone()),
-            None => (PathBuf::from("./"), PathBuf::from("./").join(&*args.in_path)),
+        match cmd_args.in_path.parent() {
+            Some(parent) => (parent.to_path_buf(), cmd_args.in_path.clone()),
+            None => (PathBuf::from("./"), PathBuf::from("./").join(&*cmd_args.in_path)),
         }
     };
 
-    fs::create_dir_all(&*args.out_dir)?;
+    fs::create_dir_all(&*cmd_args.out_dir)?;
 
     let walker =
         WalkBuilder::new(&*in_path)
@@ -80,12 +112,14 @@ fn main() -> Result<()> {
         in_path: in_path,
         in_prefix: in_prefix,
         next_archive_num: 0,
-        out_dir: args.out_dir,
+        out_dir: cmd_args.out_dir,
     });
 
-    tracing::info!(duration_ms = start.elapsed().as_millis(), "Done");
-
     Ok(())
+}
+
+fn decompress(_cmd_args: DecompressArgs, _args: Args) -> Result<()> {
+    todo!();
 }
 
 fn init_logging(log_json: bool) -> Result<()> {
