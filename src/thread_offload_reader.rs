@@ -209,6 +209,8 @@ impl Drop for ThreadOffloadReader {
                     "ThreadOffloadReader::drop() - joining offload thread.");
                 return;
             }
+
+            thread::sleep(Duration::from_millis(100));
         }
 
         // Timeout.
