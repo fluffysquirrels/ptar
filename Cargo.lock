@@ -92,12 +92,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cache_line_size"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ccbba4460cca3070e466e87ed2b1a50206d6a09dd2e2249da23c434a3e6535"
-
-[[package]]
 name = "cc"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -489,7 +483,6 @@ dependencies = [
  "progress-streams",
  "rayon",
  "regex",
- "spsc-bip-buffer",
  "tar",
  "tracing",
  "tracing-bunyan-formatter",
@@ -630,15 +623,6 @@ name = "smallvec"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
-
-[[package]]
-name = "spsc-bip-buffer"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "128935512e38b410d74c8cb6750b1407953b35fed89d29fe26fbfa1893799d3f"
-dependencies = [
- "cache_line_size",
-]
 
 [[package]]
 name = "strsim"

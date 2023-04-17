@@ -1,15 +1,9 @@
-use crate::Result;
-use progress_streams::ProgressReader;
+use crate::{ArcProgressReader, Result, ThreadOffloadReader};
 use rayon::prelude::*;
-// use spsc_bip_buffer as bip;
 use std::{
     fs::{self, File},
-    io::BufReader,
+    // io::BufReader,
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
 };
 use valuable::Valuable;
 
@@ -56,34 +50,24 @@ pub fn main(cmd_args: Args, args: crate::Args) -> Result<()> {
 
                     let file_read = File::open(&*archive_path)?;
 
-                    let source_bytes_read = Arc::new(AtomicU64::new(0));
+                    let source_prog_read = ArcProgressReader::new(file_read);
+                    let _source_bytes_read = source_prog_read.bytes_read();
 
-                    let source_bytes_read2 = source_bytes_read.clone();
-                    let prog_read = ProgressReader::new(
-                        file_read,
-                        move |read_len| {
-                            let _ = source_bytes_read2.fetch_add(
-                                read_len.try_into().expect("usize as u64"),
-                                Ordering::SeqCst);
-                        });
+                    let zstd_decoder = zstd::stream::read::Decoder::new(source_prog_read)?;
 
-                    let zstd_decoder = zstd::stream::read::Decoder::new(prog_read)?;
+                    let uncompressed_prog_read = ArcProgressReader::new(zstd_decoder);
+                    let _uncompressed_bytes_read = uncompressed_prog_read.bytes_read();
 
-                    let uncompressed_bytes_read = Arc::new(AtomicU64::new(0));
-                    let uncompressed_bytes_read2 = uncompressed_bytes_read.clone();
-                    let uncompressed_prog_read = ProgressReader::new(
-                        zstd_decoder,
-                        move |read_len| {
-                            let _ = uncompressed_bytes_read2.fetch_add(
-                                read_len.try_into().expect("usize as u64"),
-                                Ordering::SeqCst);
-                        });
-
-                    let out_capacity = zstd::stream::read::Decoder::<'_, std::io::Empty>
+                    let _out_capacity = zstd::stream::read::Decoder::<'_, std::io::Empty>
                         ::recommended_output_size();
-                    let zstd_bufread = BufReader::with_capacity(out_capacity,
-                                                                uncompressed_prog_read);
-                    let mut tar = tar::Archive::new(zstd_bufread);
+                    // let uncompressed_bufread = BufReader::with_capacity(out_capacity,
+                    //                                                     uncompressed_prog_read);
+
+                    let uncompressed_thread_offload_read =
+                        ThreadOffloadReader::new(uncompressed_prog_read);
+
+                    let mut tar = tar::Archive::new(uncompressed_thread_offload_read);
+                    // let mut tar = tar::Archive::new(uncompressed_bufread);
                     tar.unpack(&*cmd_args.out_dir)?;
 
                     Ok(())

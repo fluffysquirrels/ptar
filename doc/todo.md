@@ -1,6 +1,7 @@
 # ptar TODO
 
-* Implement decompress in ptar: GNU tar chokes on errors when multiple processes are extracting to the same tree.
+* Speed up decompress
+    * Try splitting each archive thread into 2: one to decompress the zstd, one to extract the tar
 * Skip making the first (empty) archive. Can lazily create the archive file.
 * Write initial README.
     * Write build instructions
