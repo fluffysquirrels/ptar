@@ -67,6 +67,7 @@ impl ThreadOffloadReader {
 }
 
 impl OffloadThread {
+    #[tracing::instrument(target = "OffloadThread::main", skip(self), level = "debug")]
     fn main(mut self) {
         let res = (|| -> ThreadResult<()> {
             loop {
@@ -95,7 +96,10 @@ impl OffloadThread {
                 }
 
                 buf.truncate(read);
-                let res = self.ready_chunks_tx.send(buf);
+
+                let send_span = tracing::trace_span!("OffloadThread ready_chunks_tx.send()");
+                let res = send_span.in_scope(|| self.ready_chunks_tx.send(buf));
+                drop(send_span);
 
                 if let Err(_) = res {
                     return Err(ThreadError::Shutdown);
@@ -151,7 +155,11 @@ impl<E: StdError + Send + Sync + 'static> From<E> for ThreadError {
 impl Read for ThreadOffloadReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if let None = self.curr_chunk {
-            let res = self.ready_chunks_rx.recv_timeout(self.read_timeout);
+            let recv_span = tracing::trace_span!(
+                "ThreadOffloadReader::read: ready_chunks_rx.recv_timeout");
+            let res = recv_span.in_scope(|| self.ready_chunks_rx.recv_timeout(self.read_timeout));
+            drop(recv_span);
+
             let next = match res {
                 Ok(buf) => buf,
                 // Offload thread has terminated.
@@ -193,11 +201,13 @@ impl Read for ThreadOffloadReader {
                 Err(TrySendError::Disconnected(_)) => (),
             }
         }
+
         Ok(count)
     }
 }
 
 impl Drop for ThreadOffloadReader {
+    #[tracing::instrument(target = "ThreadOffloadReader::drop", level = "debug", skip(self))]
     fn drop(&mut self) {
         self.should_stop.store(true, Ordering::SeqCst);
         let start = Instant::now();
