@@ -42,7 +42,7 @@ pub fn main(cmd_args: Args, args: crate::Args) -> Result<()> {
                 .with_max_len(1) // 1 item per thread
                 .try_for_each(|archive_path: PathBuf| -> Result<()> {
                     let _thread_span = tracing::debug_span!(
-                        "decompress() thread",
+                        "decompress thread",
                         archive_file_name = &*archive_path.file_name()
                             .expect("archive_path.file_name().is_some()")
                             .to_string_lossy()
