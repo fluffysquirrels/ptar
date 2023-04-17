@@ -38,7 +38,7 @@ echo "Finished archiving with ptar"
 echo -e "\nStarting extracting"
 
 time target/release/ptar \
-         --threads $(( THREADS + 1 )) \
+         --threads "${THREADS}" \
          decompress \
          --in-dir "${OUT_DIR}" \
          --out-dir "${EXTRACT_DIR}"

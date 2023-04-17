@@ -3,7 +3,7 @@ use crate::Result;
 use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::{
     fs::{self, File},
-    io::BufWriter,
+    io::{BufWriter, Write},
     path::PathBuf,
     result::Result as StdResult,
     sync::{
@@ -23,20 +23,25 @@ pub struct Args {
 
 struct PVB {
     error_count: Arc<AtomicUsize>,
+    #[allow(dead_code)] // Not used yet.
     in_path: PathBuf,
     in_prefix: PathBuf,
     next_archive_num: u64,
     out_dir: PathBuf,
 }
 
-struct ErrorPV;
-
 struct PV {
     archive_num: u64,
     error_count: Arc<AtomicUsize>,
     in_prefix: PathBuf,
     out_path: PathBuf,
-    /// Always Some(_) except in the drop implementation.
+
+    /// tarb is None when PV is constructed,
+    /// then on first use it's initialised to Some(value),
+    /// then during drop() its value is taken and tarb is None again.
+    ///
+    /// The lazy initialisation is so that the first thread / ParallelVisitor that `ignore`
+    /// starts, which visits no files, doesn't create an unnecessary empty archive.
     tarb: Option<tar::Builder<zstd::stream::write::Encoder<'static, BufWriter<File>>>>,
 }
 
@@ -65,8 +70,8 @@ pub fn main(cmd_args: Args, args: crate::Args) -> Result<()> {
 
     walker.visit(&mut PVB {
         error_count: error_count.clone(),
-        in_path: in_path,
-        in_prefix: in_prefix,
+        in_path,
+        in_prefix,
         next_archive_num: 0,
         out_dir: cmd_args.out_dir,
     });
@@ -84,45 +89,38 @@ impl ignore::ParallelVisitorBuilder<'static> for PVB {
         self.next_archive_num += 1;
         let out_file_path = self.out_dir.join(format!("{archive_num:08}.tar.zstd"));
 
-        // Closure to capture errors returned with `?`.
-        let res = (|| -> Result<PV> {
-            let file = fs::OpenOptions::new()
-                                       .write(true)
-                                       .create_new(true)
-                                       .open(&*out_file_path)?;
-            let bufw = BufWriter::with_capacity(128 * 1024, file);
-            let mut zstdw = zstd::stream::write::Encoder::new(bufw,
-                                                              ZSTD_DEFAULT_COMPRESSION_LEVEL)?;
-            // Compression will be done in a separate thread, to detach I/O and compression.
-            zstdw.multithread(1)?;
-            let tarb = tar::Builder::new(zstdw);
-            Ok(PV {
-                archive_num,
-                error_count: self.error_count.clone(),
-                in_prefix: self.in_prefix.clone(),
-                out_path: out_file_path.to_path_buf(),
-                tarb: Some(tarb),
-            })
-        })();
-
-        match res {
-            Err(err) => {
-                tracing::error!(in_path = %self.in_path.display(),
-                                out_file_path = %out_file_path.display(),
-                                archive_num,
-                                %err,
-                                "Error creating ParallelVisitor");
-                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
-                Box::new(ErrorPV)
-            },
-            Ok(pv) => Box::new(pv),
-        }
+        Box::new(PV {
+            archive_num,
+            error_count: self.error_count.clone(),
+            in_prefix: self.in_prefix.clone(),
+            out_path: out_file_path.to_path_buf(),
+            tarb: None,
+        })
     }
 }
 
-impl ignore::ParallelVisitor for ErrorPV {
-    fn visit(&mut self, _entry: StdResult<DirEntry, ignore::Error>) -> WalkState {
-        WalkState::Quit
+impl PV {
+    fn tarb(&mut self) -> Result<&mut tar::Builder<impl Write>> {
+        if let Some(ref mut tarb) = self.tarb {
+            return Ok(tarb);
+        }
+
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&*self.out_path)?;
+        let bufw = BufWriter::with_capacity(128 * 1024, file);
+        let mut zstdw = zstd::stream::write::Encoder::new(bufw,
+                                                          ZSTD_DEFAULT_COMPRESSION_LEVEL)?;
+        // Compression will be done in a separate thread, to detach I/O and compression.
+        zstdw.multithread(1)?;
+        let tarb = tar::Builder::new(zstdw);
+
+        Ok(self.tarb.insert(tarb))
+    }
+
+    fn incr_errors(&self) {
+        let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -131,7 +129,7 @@ impl ignore::ParallelVisitor for PV {
         let entry = match entry {
             Err(err) => {
                 tracing::warn!(%err, "Error given to PV.visit");
-                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
+                self.incr_errors();
                 return WalkState::Continue;
             },
             Ok(v) => v,
@@ -151,14 +149,23 @@ impl ignore::ParallelVisitor for PV {
                                 prefix = %self.in_prefix.display(),
                                 %err,
                                 "Error stripping path prefix");
-                let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
+                self.incr_errors();
                 return WalkState::Quit;
             }
         };
-        if let Err(err) = self.tarb.as_mut().expect("PV.tarb always Some except in drop")
-                                   .append_path_with_name(path, rel_path) {
+
+        let tarb = match self.tarb() {
+            Ok(tarb) => tarb,
+            Err(err) => {
+                tracing::error!(path = %path.display(), %err, "Error creating tarb");
+                self.incr_errors();
+                return WalkState::Quit;
+            }
+        };
+
+        if let Err(err) = tarb.append_path_with_name(path, rel_path) {
             tracing::error!(path = %path.display(), %err, "Error appending file");
-            let _ = self.error_count.fetch_add(1, Ordering::SeqCst);
+            self.incr_errors();
             return WalkState::Quit;
         }
 
@@ -173,11 +180,13 @@ impl Drop for PV {
 
         // Closure to catch errors with `?`.
         let res = (|| -> Result<()> {
-            let tarb = self.tarb.take();
+            let Some(tarb) = self.tarb.take() else {
+                return Ok(());
+            };
+
             // tarb.into_inner() finishes writing the tar archive.
             let zstdw: zstd::stream::write::Encoder<_> =
-                tarb.expect("PV.tarb always Some except in drop")
-                    .into_inner()?;
+                tarb.into_inner()?;
             let bufw = zstdw.finish()?;
             let file = bufw.into_inner()
                            .map_err(|err| err.into_error())?;
