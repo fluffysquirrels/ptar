@@ -466,12 +466,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "progress-streams"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e965d96c8162c607b0cd8d66047ad3c9fd35273c134d994327882c6e47f986a7"
-
-[[package]]
 name = "ptar"
 version = "0.1.0"
 dependencies = [
@@ -480,7 +474,6 @@ dependencies = [
  "crossbeam-channel",
  "ignore",
  "once_cell",
- "progress-streams",
  "rayon",
  "regex",
  "tar",

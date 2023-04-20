@@ -55,7 +55,7 @@ pub fn main(cmd_args: Args, args: crate::Args) -> Result<()> {
                     let zstd_decoder = zstd::stream::read::Decoder::new(source_prog_read)?;
 
                     let (uncompressed_prog_read, _uncompresed_bytes_read) =
-                        ArcProgressReader::new(zstd_decoder);
+                        ProgressReader::new(zstd_decoder);
 
                     let _out_capacity = zstd::stream::read::Decoder::<'_, std::io::Empty>
                         ::recommended_output_size();
