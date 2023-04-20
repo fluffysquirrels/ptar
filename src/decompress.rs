@@ -1,4 +1,4 @@
-use crate::{ArcProgressReader, Result, ThreadOffloadReader};
+use crate::{ProgressReader, Result, ThreadOffloadReader};
 use rayon::prelude::*;
 use std::{
     fs::{self, File},
@@ -50,13 +50,12 @@ pub fn main(cmd_args: Args, args: crate::Args) -> Result<()> {
 
                     let file_read = File::open(&*archive_path)?;
 
-                    let source_prog_read = ArcProgressReader::new(file_read);
-                    let _source_bytes_read = source_prog_read.bytes_read();
+                    let (source_prog_read, _source_bytes_read) = ProgressReader::new(file_read);
 
                     let zstd_decoder = zstd::stream::read::Decoder::new(source_prog_read)?;
 
-                    let uncompressed_prog_read = ArcProgressReader::new(zstd_decoder);
-                    let _uncompressed_bytes_read = uncompressed_prog_read.bytes_read();
+                    let (uncompressed_prog_read, _uncompresed_bytes_read) =
+                        ArcProgressReader::new(zstd_decoder);
 
                     let _out_capacity = zstd::stream::read::Decoder::<'_, std::io::Empty>
                         ::recommended_output_size();

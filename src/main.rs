@@ -2,12 +2,12 @@
 #[macro_use]
 mod lazy_regex;
 
-mod arc_progress_reader;
 mod compress;
 mod decompress;
+mod progress_reader;
 mod thread_offload_reader;
 
-use crate::arc_progress_reader::ArcProgressReader;
+use crate::progress_reader::ProgressReader;
 use crate::thread_offload_reader::ThreadOffloadReader;
 
 use clap::Parser;
