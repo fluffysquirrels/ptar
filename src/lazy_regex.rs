@@ -38,6 +38,13 @@ macro_rules! lazy_regex {
     }};
 }
 
+/// Statically check our dependencies are built.
+mod static_check {
+    #![allow(unused_imports)]
+    use once_cell::sync::OnceCell;
+    use regex::Regex;
+}
+
 #[cfg(test)]
 mod tests {
     use regex::Regex;
