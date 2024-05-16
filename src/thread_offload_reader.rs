@@ -49,7 +49,7 @@ impl ThreadOffloadReader {
             inner: inner_boxed,
             ready_chunks_tx,
             reuse_chunks_rx,
-            buf_len: 128 * 1024,
+            buf_len: 512 * 1024,
             should_stop: should_stop.clone(),
         };
 
